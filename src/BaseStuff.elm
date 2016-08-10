@@ -34,10 +34,14 @@ type alias GameData =
     , background : Form
     }
 
-type GameMsg = NothingHappened
+type GameMsg
+    = HandleKeyDown Char
+    | HandleKeyUp Char
     | MouseMove (Float, Float)
     | Tick Time
-    | PauseToogle
+    | PauseGame
+    | ResumeGame
+    | ResetGame
     | JumpDown
     | JumpUp
 
@@ -46,10 +50,11 @@ type GameMsg = NothingHappened
 initGameData : InitFlags -> (GameData, Cmd GameMsg)
 initGameData { width, height, seed } = (initGameData' width height (initialSeed seed), Cmd.none)
 
+initGameData' : Int -> Int -> Seed -> GameData
 initGameData' width height seed =
   let
     (platforms, nextSeed) = Random.step (genPlatforms (toFloat width) 0 (toFloat (2 * height))) seed
-  in  
+  in
         { width = width
         , height = height
         , flWidth = toFloat width

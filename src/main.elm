@@ -3,6 +3,8 @@ module Main exposing (..)
 import Text exposing (..)
 import Html exposing (..)
 import Html.App
+import ProgramEx
+import ProgramEx.States as States exposing(States)
 import Html.Events
 import Time
 import Element exposing (..)
@@ -28,7 +30,7 @@ worldstep : (GameData -> Generator GameData) -> GameData -> GameData
 worldstep f d =
   let
     (nd, nextSeed) = step (f d) d.seed
-  in  
+  in
     { nd | seed = nextSeed}
 
 -- This constant should be lower than the maximum value of the jump parabole.
@@ -151,23 +153,15 @@ stepTime d t =
 
 updateScene : GameMsg -> GameData -> (GameData, Cmd GameMsg)
 updateScene msg d =
-
-    (case d.state of
-        GameOver -> case msg of
-            PauseToogle -> let r = resetGameData d in { r | state = Running }
-            _ -> d
-        Paused -> case msg of
-            PauseToogle -> { d | state = Running }
-            _ -> d
-        Running -> case msg of
-            MouseMove (x,_) -> { d | characterPosX = min x d.flWidth}
-            Tick t -> stepTime d t
-            PauseToogle -> { d | state = Paused }
-            JumpDown -> { d | jumpPressed = True }
-            JumpUp -> { d | jumpPressed = False }
-            _ -> d
-    , Cmd.none
-    )
+  case msg of
+    ResetGame       -> let r = resetGameData d in ( { r | state = Running }, Cmd.none)
+    ResumeGame      -> ( { d | state = Running }, Cmd.none )
+    PauseGame       -> ( { d | state = Paused  }, Cmd.none )
+    MouseMove (x,_) -> ( { d | characterPosX = min x d.flWidth }, Cmd.none )
+    Tick t          -> ( stepTime d t, Cmd.none )
+    JumpDown        -> ( { d | jumpPressed = True  }, Cmd.none )
+    JumpUp          -> ( { d | jumpPressed = False }, Cmd.none )
+    _               -> ( d, Cmd.none )
 
 onMouseMove : Attribute GameMsg
 onMouseMove =
@@ -181,19 +175,32 @@ render d = div [onMouseMove] [toHtml (renderScene d)]
 subscriptions : GameData -> Sub GameMsg
 subscriptions d =
     Sub.batch
-        ([ Keyboard.downs (\c -> if Char.fromCode c == 'P' then PauseToogle else NothingHappened) ] ++
-            if d.state == Running then
-                [ AnimationFrame.diffs Tick
-                , Keyboard.downs (\c -> if Char.fromCode c == ' ' then JumpDown else NothingHappened)
-                , Keyboard.ups (\c -> if Char.fromCode c == ' ' then JumpUp else NothingHappened)
-                ]
-            else
-                [])
+      [ Keyboard.downs       (\c -> HandleKeyDown (Char.fromCode c))
+      , Keyboard.ups         (\c -> HandleKeyUp   (Char.fromCode c))
+      , AnimationFrame.diffs        Tick
+      ]
+
+filters : GameMsg -> GameData -> ( GameMsg, States GameData GameMsg )
+filters msg d =
+    case ( msg, d.state ) of
+      ( HandleKeyDown 'P', GameOver ) -> ( ResetGame,  States.enableAll                   ) {- I prefer explicit state transition calls -}
+      ( HandleKeyDown 'P', Paused   ) -> ( ResumeGame, States.enableAll                   ) {- I prefer explicit state transition calls -}
+      ( HandleKeyDown 'P', Running  ) -> ( PauseGame,  States.enableAll                   ) {- I prefer explicit state transition calls -}
+      ( HandleKeyDown ' ', Running  ) -> ( JumpDown,   States.enableOnly [States.Update]  ) {- Only handle data update, no need to re-render between frames -}
+      ( HandleKeyUp   ' ', Running  ) -> ( JumpUp,     States.enableOnly [States.Update]  ) {- Only handle data update, no need to re-render between frames -}
+      ( Tick _           , Running  ) -> ( msg,        States.enableAll                   ) {- Only handle Ticks while game is `Running` -}
+      ( HandleKeyDown  _ , Running  ) -> ( msg,        States.disableAll                  ) {- Explicitely turn off -}
+      ( HandleKeyUp    _ , Running  ) -> ( msg,        States.disableAll                  ) {- Explicitely turn off -}
+      ( Tick           _ , _        ) -> ( msg,        States.disableAll                  ) {- Explicitely turn off -}
+      _      {- Fallback Case -}      -> ( msg,        States.enableAll                   )
 
 main : Program InitFlags
-main = Html.App.programWithFlags
- { init = initGameData
- , view = render
- , update = updateScene
- , subscriptions = subscriptions
- }
+main =
+  Html.App.programWithFlags <|
+    ProgramEx.programExBuilderWithFlags
+      { init = initGameData
+      , filters = filters
+      , view = render
+      , update = updateScene
+      , subscriptions = subscriptions
+      }
